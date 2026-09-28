@@ -40,7 +40,7 @@ Credentials, session histories, and private OpenCode configuration are not part 
 Using the OpenCode **V2** CLI:
 
 ```sh
-opencode plugin add github:Changhochien/opencode-antigravity-cli#v0.1.0
+opencode plugin add github:Changhochien/opencode-antigravity-cli#v0.1.1
 ```
 
 This installs the plugin globally. It ships compiled JavaScript, so installation does not need a build step or lifecycle scripts.
@@ -50,7 +50,7 @@ If your desktop application bundles V2 but `opencode --version` shows V1, use th
 ### 2. Install the single agent
 
 ```sh
-npx --yes --package=github:Changhochien/opencode-antigravity-cli#v0.1.0 opencode-antigravity-agent
+npx --yes --package=github:Changhochien/opencode-antigravity-cli#v0.1.1 opencode-antigravity-agent
 ```
 
 The installer writes `~/.config/opencode/agents/antigravity.md`, respecting `XDG_CONFIG_HOME`. It preserves an existing file. Add `--project` to install into the current project's `.opencode/agents/` instead.
@@ -101,7 +101,7 @@ For a custom installation, use an absolute executable path in the plugin entry i
   "$schema": "https://opencode.ai/config.json",
   "plugins": [
     {
-      "package": "github:Changhochien/opencode-antigravity-cli#v0.1.0",
+      "package": "github:Changhochien/opencode-antigravity-cli#v0.1.1",
       "options": { "binary": "/path/to/agy" }
     }
   ]
@@ -149,10 +149,12 @@ cd opencode-antigravity-cli
 bun install --frozen-lockfile
 bun run typecheck
 bun test
-bun run build
+bun run build:dist
 ```
 
 Tests use fixture models and subprocesses; they require neither AGY nor an account and make no paid model calls. CI runs on Linux, macOS, and Windows. Compiled `dist/` files are committed so Git installs work without a local TypeScript compiler.
+
+The build script is deliberately named `build:dist`: a plain `build` script triggers npm Git dependency preparation, which fails in the bundled OpenCode 2.0.16 CLI. Git installations consume the committed `dist/` directly.
 
 Live AGY delegation, file reads, and conversation resumption were verified on macOS with OpenCode 2.0.16. Other platforms have portable executable discovery and automated tests; live AGY behavior depends on the local installation.
 
