@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
 import { renameSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,11 +8,12 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { Jobs, type Job } from './jobs'
 import { atomic } from './worker.mjs'
+import { cleanup } from './fixtures/cleanup'
 
 const directories: string[] = []
 const roots = join(tmpdir(), 'opencode')
 const fake = fileURLToPath(new URL('./fixtures/fake-agy.mjs', import.meta.url))
-afterEach(async () => { for (const dir of directories.splice(0)) await rm(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 }) })
+afterEach(async () => { for (const dir of directories.splice(0)) await cleanup(dir) })
 async function fixture() {
   await mkdir(roots, { recursive: true })
   const dir = await mkdtemp(join(roots, 'agy-jobs-test-')); directories.push(dir)

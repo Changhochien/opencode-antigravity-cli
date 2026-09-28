@@ -1,10 +1,11 @@
 import { expect, test } from 'bun:test'
-import { mkdtemp, mkdir, realpath, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, realpath } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { registerTools, lifecycleTools } from './tools'
 import { Jobs } from './jobs'
+import { cleanup } from './fixtures/cleanup'
 
 test('all lifecycle tools work via registration, retain compatibility, and use session-relative directories', async () => {
   await mkdir(join(tmpdir(), 'opencode'), { recursive: true })
@@ -47,6 +48,6 @@ test('all lifecycle tools work via registration, retain compatibility, and use s
     expect((await tools.antigravity_start.execute({ prompt: '{"delay":400}', directory: 'workspace', model: 'explicit-model' }, context)).metadata.job_id).toBe(job.job_id)
   } finally {
     for (const job of await jobs.list('session')) await jobs.wait('session', job.job_id, 5)
-    await rm(dir, { recursive: true, force: true })
+    await cleanup(dir)
   }
 })

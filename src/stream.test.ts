@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -12,6 +12,7 @@ import { registerTools } from './tools'
 import { setupProvider } from './provider'
 import { streamJob } from './stream'
 import type { Job, Observation } from './jobs'
+import { cleanup as removeFixture } from './fixtures/cleanup'
 
 // Use the AI package's own Effect version (global OpenCode configs can contain
 // plugins with a different Effect version).
@@ -58,7 +59,7 @@ async function fixture(spec: object) {
   return { jobs, job, dir, gate, followup, request, cleanup: async () => {
     await writeFile(gate, '')
     await jobs.wait('stream-session', job.job_id, 5)
-    cleanup(); await rm(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
+    cleanup(); await removeFixture(dir)
   } }
 }
 function frames(sse: string): any[] {
