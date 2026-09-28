@@ -89,7 +89,7 @@ export class Jobs {
     }
   }
   async status(session: string, id: string): Promise<Job> {
-    const job = await this.raw(id)
+    let job = await this.raw(id)
     if (job.session_id !== session) throw new Error('This job belongs to a different OpenCode session')
     const now = (this.controls.now ?? Date.now)()
     if (!job.completed_at && !finished(job)) {
@@ -99,9 +99,16 @@ export class Jobs {
       if (alive && age <= (this.controls.staleMs ?? 10000)) job.observer = 'attached'
       else if (!job.worker_pid && age < (this.controls.staleMs ?? 10000)) job.observer = 'starting'
       else {
-        job.status = 'UNKNOWN'
-        job.observer = 'unavailable'
-        job.diagnostic = alive ? 'supervisor_heartbeat_stale' : 'supervisor_missing_or_identity_mismatch'
+        // The worker may have published completion and exited after our first
+        // read. Reconcile that snapshot before projecting a missing observer.
+        const latest = await this.raw(id)
+        if (latest.session_id !== session) throw new Error('This job belongs to a different OpenCode session')
+        if (latest.completed_at) { job = latest; job.observer = 'closed' }
+        else {
+          job.status = 'UNKNOWN'
+          job.observer = 'unavailable'
+          job.diagnostic = alive ? 'supervisor_heartbeat_stale' : 'supervisor_missing_or_identity_mismatch'
+        }
       }
     } else job.observer = 'closed'
     // Recovery is read-only. Never overwrite a late completion with a stale projection.

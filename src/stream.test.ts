@@ -58,7 +58,7 @@ async function fixture(spec: object) {
   return { jobs, job, dir, gate, followup, request, cleanup: async () => {
     await writeFile(gate, '')
     await jobs.wait('stream-session', job.job_id, 5)
-    cleanup(); await rm(dir, { recursive: true, force: true })
+    cleanup(); await rm(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   } }
 }
 function frames(sse: string): any[] {

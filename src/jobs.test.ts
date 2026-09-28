@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { renameSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -11,11 +12,11 @@ import { atomic } from './worker.mjs'
 const directories: string[] = []
 const roots = join(tmpdir(), 'opencode')
 const fake = fileURLToPath(new URL('./fixtures/fake-agy.mjs', import.meta.url))
-afterEach(async () => { for (const dir of directories.splice(0)) await rm(dir, { recursive: true, force: true }) })
+afterEach(async () => { for (const dir of directories.splice(0)) await rm(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 }) })
 async function fixture() {
   await mkdir(roots, { recursive: true })
   const dir = await mkdtemp(join(roots, 'agy-jobs-test-')); directories.push(dir)
-  const jobs = new Jobs(join(dir, 'jobs'), { binary: async () => process.execPath, prefix: [fake], node: process.execPath, pollMs: 10 })
+  const jobs = new Jobs(join(dir, 'jobs'), { binary: async () => process.execPath, prefix: [fake], node: 'node', pollMs: 10 })
   const start = (spec: object = {}, extra: object = {}) => jobs.start({ prompt: JSON.stringify(spec), session_id: 'session-a', directory: dir, ...extra })
   return { dir, jobs, start }
 }
@@ -66,16 +67,19 @@ test('detached supervisor records late completion after its launching process ex
   expect(recovered.response).toBe('done 🛰️')
 })
 test('agent idle remains waiting until background outcome is observed', async () => {
-  const { jobs, start } = await fixture()
-  const job = await start({ background: true, delay: 400 })
-  const idle = await until(jobs, job.job_id, j => j.tasks[0]?.state === 'RUNNING')
-  expect(['RUNNING', 'WAITING_BACKGROUND']).toContain(idle.status)
-  expect(idle.tasks[0].state).toBe('RUNNING')
+  const { jobs, start, dir } = await fixture()
+  const gate = join(dir, 'release')
+  const job = await start({ background: true, gate })
+  try {
+    const idle = await until(jobs, job.job_id, j => j.tasks[0]?.state === 'RUNNING')
+    expect(['RUNNING', 'WAITING_BACKGROUND']).toContain(idle.status)
+    expect(idle.tasks[0].state).toBe('RUNNING')
+  } finally { await writeFile(gate, '') }
   const done = await jobs.wait('session-a', job.job_id, 5)
   expect(done.status).toBe('SUCCESS')
   expect(done.tasks[0].state).toBe('DONE')
   expect(done.tasks[0].log_reference).toBe('/fixture/task-2.log')
-})
+}, 15000)
 test('a SUCCESS envelope cannot hide unresolved or failed background work', async () => {
   const { jobs, start } = await fixture()
   const unresolved = await start({ background: true, unresolved: true })
@@ -154,6 +158,29 @@ test('injected clock/sleep can expire an hour-long wait without real time passin
     sleep: async ms => { now += ms }, launch: async () => {} })
   const job = await jobs.start({ session_id: 'session-a', directory: dir, prompt: 'clock' })
   expect((await jobs.wait('session-a', job.job_id, 3601)).wait_expired).toBe(true)
+})
+test('completion published between snapshot and process check wins over a missing observer', async () => {
+  const { jobs: original, dir } = await fixture()
+  const jobs = new Jobs(original.root, { launch: async () => {}, identity: () => {
+    atomic(join(jobs.path(job.job_id), 'state.json'), { ...job, status: 'SUCCESS', completed_at: new Date().toISOString(), response: 'finished' })
+    return undefined
+  } })
+  const job = await jobs.start({ session_id: 'session-a', directory: dir, prompt: 'completion race' })
+  atomic(join(jobs.path(job.job_id), 'state.json'), { ...job, worker_pid: 42, worker_identity: 'exited' })
+  const observed = await jobs.status('session-a', job.job_id)
+  expect(observed.status).toBe('SUCCESS')
+  expect(observed.response).toBe('finished')
+})
+test('atomic replacement retries transient sharing failures without losing the previous snapshot', async () => {
+  const { dir } = await fixture(), path = join(dir, 'snapshot.json')
+  atomic(path, { revision: 1 })
+  let attempts = 0, waited = 0
+  atomic(path, { revision: 2 }, { rename: (from: string, to: string) => {
+    if (++attempts < 3) throw Object.assign(new Error('sharing violation'), { code: 'EPERM' })
+    renameSync(from, to)
+  }, wait: (ms: number) => { waited += ms } })
+  expect(JSON.parse(await readFile(path, 'utf8'))).toEqual({ revision: 2 })
+  expect(waited).toBe(20)
 })
 test('jobs and sessions are isolated, including cancellation and usage baselines', async () => {
   const { jobs, start } = await fixture()

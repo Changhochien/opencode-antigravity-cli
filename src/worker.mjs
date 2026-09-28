@@ -16,10 +16,21 @@ export function processIdentity(pid) {
   try { return execFileSync('/bin/ps', ['-p', String(pid), '-o', 'lstart='], { encoding: 'utf8', timeout: 1000 }).trim() || undefined }
   catch { return undefined }
 }
-export function atomic(path, value) {
+export function atomic(path, value, controls = {}) {
   const temporary = `${path}.${process.pid}.tmp`
   writeFileSync(temporary, JSON.stringify(value), { mode: 0o600 })
-  renameSync(temporary, path)
+  // Windows readers/virus scanners can briefly deny replacement while a file
+  // handle is closing. Keep the previous snapshot intact and retry the same
+  // atomic rename, never truncate the live state or restart the CLI.
+  const replace = controls.rename ?? renameSync
+  const wait = controls.wait ?? (ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms))
+  for (let attempt = 0; ; attempt++) {
+    try { replace(temporary, path); return }
+    catch (error) {
+      if (attempt >= 50 || !['EACCES', 'EPERM', 'EBUSY'].includes(error.code)) throw error
+      wait(10)
+    }
+  }
 }
 
 export async function supervise(directory, request, deps = {}) {
