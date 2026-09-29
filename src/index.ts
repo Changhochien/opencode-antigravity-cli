@@ -8,7 +8,7 @@ export default Plugin.define({
   async setup(ctx) {
     const binary = typeof ctx.options.binary === 'string' ? ctx.options.binary : undefined
     const jobs = new Jobs(undefined, { binary: () => executable(binary) })
-    await registerTools(ctx, jobs)
+    await registerTools(ctx, jobs, { directTools: ctx.options.directTools === true })
     // Unloading closes the provider endpoint, not the detached job supervisors.
     return setupProvider(ctx, {
       models: () => discoverModels(binary),

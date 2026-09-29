@@ -3,7 +3,30 @@ import { homedir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import { publicJob } from './jobs.js';
 export const lifecycleTools = new Set(['antigravity_run', 'antigravity_start', 'antigravity_status', 'antigravity_wait', 'antigravity_cancel']);
-export async function registerTools(ctx, jobs) {
+const recoveryTools = new Set(['antigravity_status', 'antigravity_wait', 'antigravity_cancel']);
+function canDelegate(agent, provider, options) {
+    return agent === 'antigravity' || provider === 'agy' || options.directTools === true;
+}
+export async function registerTools(ctx, jobs, options = {}) {
+    // Tool registration is global. Child-agent permissions alone do not hide a
+    // tool from a parent model; remove it from the actual per-request catalog.
+    // Register this before provider discovery so discovery failure cannot expose
+    // an unscoped direct-delegation route.
+    await ctx.session.hook('context', async (event) => {
+        if (canDelegate(event.agent, event.model.providerID, options))
+            return;
+        for (const name of lifecycleTools)
+            if (!recoveryTools.has(name))
+                delete event.tools[name];
+        // Legacy jobs keep their original owner and remain observable/cancelable.
+        // No new tools are added here: normal permission filtering remains intact.
+        if (![...recoveryTools].some(name => name in event.tools))
+            return;
+        if (await jobs.latest(event.sessionID))
+            return;
+        for (const name of recoveryTools)
+            delete event.tools[name];
+    });
     await ctx.command.transform(editor => editor.add({
         name: 'agy', description: 'Antigravity jobs: start <task>, status [job], wait [job] [seconds], cancel [job]',
         async execute({ sessionID, prompt, delivery }) {
@@ -60,6 +83,12 @@ export async function registerTools(ctx, jobs) {
                         throw new Error('wait_seconds must be between 0 and 86400');
                     context.signal.throwIfAborted(); // Before start only. Later cancellation merely detaches the caller.
                     const session = await ctx.session.get({ sessionID: context.sessionID });
+                    // Also guard execution for stale/hallucinated tool calls and direct API
+                    // callers. Visibility is the normal route; this check precedes any job
+                    // creation, directory access or conversation continuation.
+                    if (!canDelegate(context.agent, session.model?.providerID, options)) {
+                        throw new Error('Delegate through the native subagent tool with agent "antigravity". Direct AGY run/start tools require the antigravity agent, an agy model, or plugin option directTools: true.');
+                    }
                     const streaming = name === 'antigravity_run' && input.stream === true && session.model?.providerID === 'agy';
                     if (streaming && input.wait_seconds === undefined && input.timeout_seconds === undefined)
                         seconds = 86400;

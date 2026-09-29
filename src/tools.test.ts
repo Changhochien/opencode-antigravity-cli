@@ -7,7 +7,11 @@ import { registerTools, lifecycleTools } from './tools'
 import { Jobs } from './jobs'
 import { cleanup } from './fixtures/cleanup'
 
-test('all lifecycle tools work via registration, retain compatibility, and use session-relative directories', async () => {
+test.each([
+  { agent: 'antigravity', provider: 'another-provider', directTools: false },
+  { agent: 'build', provider: 'agy', directTools: false },
+  { agent: 'build', provider: 'another-provider', directTools: true },
+])('all lifecycle tools preserve directory, ownership and recovery through an allowed route: %j', async route => {
   await mkdir(join(tmpdir(), 'opencode'), { recursive: true })
   const dir = await realpath(await mkdtemp(join(tmpdir(), 'opencode', 'agy-tools-test-')))
   await mkdir(join(dir, 'workspace'))
@@ -19,14 +23,15 @@ test('all lifecycle tools work via registration, retain compatibility, and use s
     command: { transform: async (fn: any) => fn({ add: (value: any) => { command = value } }) },
     tool: { transform: async (fn: any) => fn({ add: (tool: any) => { tools[tool.name] = tool } }) },
     session: {
-      get: async () => ({ location: { directory: dir }, model: { providerID: 'another-provider' } }),
+      get: async () => ({ location: { directory: dir }, model: { providerID: route.provider } }),
       prompt: async (input: any) => { prompts.push(input) },
+      hook: async () => ({ dispose: async () => {} }),
     },
     storage: { get: async (k: string) => storage.get(k), set: async (k: string, value: any) => { storage.set(k, value) } },
   }
-  const context = { sessionID: 'session', signal: new AbortController().signal, progress: async (update: any) => { updates.push(update) } }
+  const context = { sessionID: 'session', agent: route.agent, signal: new AbortController().signal, progress: async (update: any) => { updates.push(update) } }
   try {
-    await registerTools(ctx, jobs)
+    await registerTools(ctx, jobs, { directTools: route.directTools })
     expect(new Set(Object.keys(tools))).toEqual(lifecycleTools)
     expect(command.name).toBe('agy')
     await command.execute({ sessionID: 'session', prompt: { text: 'status' }, delivery: 'queue' })

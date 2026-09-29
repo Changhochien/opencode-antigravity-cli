@@ -5,7 +5,31 @@ owns the CLI, streams output, saves early conversation identity and bounded part
 results, and keeps running when a caller times out or OpenCode reloads. No execution
 deadline is imposed by the plugin. The CLI receives `--print-timeout 0`.
 
-## Tools
+## Native-first delegation (v0.2.1+)
+
+From a normal parent agent, ask **"Use the antigravity subagent to …"**. OpenCode
+creates a native child session; that session owns the durable CLI job and its live
+output. Resume the same child session for follow-ups, observation and cancellation.
+Configure an `agy/...` model on the `antigravity` agent for native text streaming;
+the portable template otherwise inherits the parent model.
+
+Lifecycle tools are implementation details by default. They are advertised only
+to the `antigravity` agent and sessions explicitly using an `agy` model. Ordinary
+parent agents retain the native `subagent` tool and their other permitted tools.
+Direct run/start execution is also checked before any job can be created.
+
+For migration, sessions that already own direct jobs retain their **permitted**
+status/wait/cancel tools, but cannot start another direct job by default. Ownership
+does not move to a new child. An ordinary session cannot observe another session's
+job. No filtering rule restores a permission-denied tool.
+
+The plugin option **`directTools: true`** explicitly restores the legacy direct
+tool route for integrations that need it. It defaults to false; it does not grant
+permissions or change session ownership. Set it in the plugin entry's `options`
+object. v0.2.0 exposed tools globally; upgrading applies the new default while
+preserving observation/cancellation of existing owned jobs.
+
+## Internal lifecycle tools
 
 ```text
 antigravity_start({prompt: "Review this change", request_id: "review-1"})
@@ -172,6 +196,7 @@ bun install --frozen-lockfile
 bun test
 bun run typecheck
 bun run build:dist
+bun run test:package
 ```
 
 Tests use a fake CLI, temporary directories, detached test supervisors, injected

@@ -1,6 +1,6 @@
 {
   "name": "opencode-antigravity-cli",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Use the authenticated Antigravity CLI as an OpenCode agent with models in OpenChamber's model picker.",
   "type": "module",
   "license": "MIT",
@@ -28,7 +28,8 @@
   "scripts": {
     "build:dist": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "test:package": "node test/package-smoke.mjs"
   },
   "peerDependencies": { "@opencode/plugin": ">=2.0.16 <3" },
   "devDependencies": {

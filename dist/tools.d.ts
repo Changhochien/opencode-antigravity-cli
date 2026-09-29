@@ -1,4 +1,7 @@
 import type { Context } from '@opencode/plugin/promise/plugin';
 import { Jobs } from './jobs.js';
 export declare const lifecycleTools: Set<string>;
-export declare function registerTools(ctx: Context, jobs: Jobs): Promise<void>;
+export type ToolOptions = {
+    directTools?: boolean;
+};
+export declare function registerTools(ctx: Context, jobs: Jobs, options?: ToolOptions): Promise<void>;

@@ -33,8 +33,8 @@ agy models
 Then use the **V2** OpenCode CLI:
 
 ```sh
-opencode plugin add github:Changhochien/opencode-antigravity-cli#v0.2.0
-npx --yes --package=github:Changhochien/opencode-antigravity-cli#v0.2.0 opencode-antigravity-agent
+opencode plugin add github:Changhochien/opencode-antigravity-cli#v0.2.1
+npx --yes --package=github:Changhochien/opencode-antigravity-cli#v0.2.1 opencode-antigravity-agent
 ```
 
 The installer creates one global agent, respecting `XDG_CONFIG_HOME`. Add `--project` for a project-local agent. Compiled JavaScript is included; installation needs no build scripts. If your desktop bundles V2 but the terminal `opencode` is V1, use the bundled V2 executable.
@@ -43,13 +43,24 @@ Select **antigravity** → **Antigravity CLI** → a model in OpenChamber. Ordin
 
 ### Upgrading
 
-Replace the existing plugin entry with the `#v0.2.0` entry above. If you use an earlier hand-installed `plugins/antigravity.ts`, move it outside plugin discovery before enabling the package, since both register the same plugin/provider IDs.
+Replace the existing plugin entry with the `#v0.2.1` entry above. If you use an earlier hand-installed `plugins/antigravity.ts`, move it outside plugin discovery before enabling the package, since both register the same plugin/provider IDs.
 
 The installer preserves existing agent definitions. Existing users should merge the **five lifecycle permissions** from [`agents/antigravity.md`](agents/antigravity.md) into their agent; the old run-only permissions cannot invoke wait/status/cancel/start. Preserve your selected model and other custom instructions.
+
+When upgrading from v0.2.0, also merge the updated instruction to keep normal
+delegated tasks in the child session through completion/recovery. Immediate
+detached starts are reserved for explicit requests. Integrations that deliberately
+call run/start directly from other agents now need `options.directTools: true`.
 
 Refresh OpenChamber after loading the plugin. OpenCode watches configuration changes; if a manual service restart is needed, choose an idle time and use the V2 CLI's `opencode service restart`. Existing supervised jobs remain independent of that service.
 
 ## Use
+
+For delegation from another model, ask **"Use the antigravity subagent to …"**.
+The native child session owns the job and receives its live output. Continue that
+same child session for recovery or cancellation. Set the agent's model to an
+available `agy/...` model for native streaming; the portable agent template
+otherwise inherits the parent's model.
 
 With an AGY model selected:
 
@@ -61,9 +72,34 @@ Review this change and report findings.    # normal task, live streamed response
 /agy cancel [job_id] [seconds]             # explicit, owned-job cancellation request
 ```
 
-The corresponding tools are `antigravity_run`, `antigravity_start`, `antigravity_status`, `antigravity_wait`, and `antigravity_cancel`. Omit `job_id` from the status tool to recover the owning session's job list.
+The internal tools are `antigravity_run`, `antigravity_start`, `antigravity_status`, `antigravity_wait`, and `antigravity_cancel`. Omit `job_id` from the status tool to recover the owning session's job list.
 
 `wait_seconds` and the legacy `timeout_seconds` argument limit **caller waiting only**. They never terminate execution. Reuse `request_id` when retrying a task; without one, identical inputs are deduplicated within the session. Use a new key to deliberately repeat a completed task. Use `conversation_id` only to submit a genuinely new turn after the preceding job completes.
+
+### Native-first routing
+
+Since v0.2.1, the plugin hides lifecycle tools from ordinary parent models, making
+the native `antigravity` subagent the normal delegation route. The `antigravity`
+agent and explicitly selected `agy/...` models retain their permitted lifecycle
+tools. Execution also rejects direct run/start calls from other agents/providers.
+
+Sessions with older direct jobs retain permitted status/wait/cancel tools for
+their own jobs. They cannot start another direct job by default. Existing jobs
+keep their original owners; child jobs must be observed in the child session.
+
+Legacy integrations can explicitly enable `options.directTools: true` on their
+plugin entry. This restores tool visibility/direct execution, subject to existing
+permissions:
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": [{
+    "package": "github:Changhochien/opencode-antigravity-cli#v0.2.1",
+    "options": { "directTools": true }
+  }]
+}
+```
 
 ### Streaming behavior
 
@@ -94,7 +130,7 @@ For an explicit executable, merge this plugin entry into `opencode.jsonc`:
 {
   "$schema": "https://opencode.ai/config.json",
   "plugins": [{
-    "package": "github:Changhochien/opencode-antigravity-cli#v0.2.0",
+    "package": "github:Changhochien/opencode-antigravity-cli#v0.2.1",
     "options": { "binary": "/path/to/agy" }
   }]
 }
@@ -109,9 +145,16 @@ bun install --frozen-lockfile
 bun run typecheck
 bun test
 bun run build:dist
+bun run test:package
 ```
 
 Tests use a fake CLI, injected controls, and sanitized captured protocol evidence. They require no authentication or paid model calls. Streaming is also validated through OpenCode 2.0.16's own protocol parser, asserting native text/activity deltas before CLI completion. POSIX-specific signal tests are skipped on Windows; unconfirmed cancellation behavior is still exercised there.
+
+The Node package smoke check loads the compiled public entrypoint and verifies
+native routing, blocked direct calls, owned legacy recovery and the compatibility
+option against real private job records in an isolated state directory. It uses
+a mocked host context and cached model catalog; it never contacts a model or a
+running OpenCode service.
 
 Compiled `dist/` files are committed. The build script is named `build:dist` because a plain `build` script triggers npm Git preparation that fails in the bundled OpenCode 2.0.16 CLI.
 

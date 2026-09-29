@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1
+
+- Default to native subagent delegation: hide lifecycle tools from ordinary parent models and reject direct run/start execution outside the antigravity agent or an explicitly selected AGY model.
+- Preserve permitted status/wait/cancel access for sessions with existing direct jobs, without moving ownership or submitting another task.
+- Add explicit `options.directTools: true` for legacy direct-tool integrations; normal permission filtering still applies.
+- Keep normal delegated tasks in their child session through completion/recovery; reserve immediate detached starts for explicit requests.
+
 ## 0.2.0
 
 - Stream AGY response text into native OpenCode assistant messages, including subagent sessions.

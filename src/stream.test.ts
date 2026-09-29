@@ -24,13 +24,17 @@ async function fixture(spec: object) {
   const fake = fileURLToPath(new URL('./fixtures/fake-agy.mjs', import.meta.url))
   const jobs = new Jobs(join(dir, 'jobs'), { binary: async () => process.execPath, prefix: [fake], node: 'node', pollMs: 10 })
   const tools: Record<string, any> = {}, storage = new Map<string, any>()
+  const hooks: Array<{ name: string; fn: any; scope: any }> = []
   let provider: any
   const ctx: any = {
     tool: { transform: async (fn: any) => fn({ add: (t: any) => { tools[t.name] = t } }) },
     command: { transform: async () => {} },
     storage: { get: async (k: string) => storage.get(k), set: async (k: string, v: any) => { storage.set(k, v) } },
     provider: { transform: async (fn: any) => fn({ add: (value: any) => { provider = value } }) },
-    session: { get: async () => ({ location: { directory: dir }, model: { providerID: 'agy' } }), hook: async () => ({ dispose: async () => {} }) },
+    session: {
+      get: async () => ({ parentID: 'parent-session', agent: 'antigravity', location: { directory: dir }, model: { providerID: 'agy' } }),
+      hook: async (name: string, fn: any, scope: any) => { hooks.push({ name, fn, scope }); return { dispose: async () => {} } },
+    },
   }
   await registerTools(ctx, jobs)
   const cleanup = await setupProvider(ctx, {
@@ -39,9 +43,13 @@ async function fixture(spec: object) {
     observe: (session, id, seconds, signal) => jobs.observe(session, id, seconds, signal),
     auxiliary: async () => { throw new Error('not used') },
   })
+  const child = { sessionID: 'stream-session', agent: 'antigravity', model: { providerID: 'agy', id: 'fixture' }, tools: { ...tools } }
+  for (const hook of hooks) {
+    if (hook.name === 'context' && (!hook.scope || hook.scope.providerID === child.model.providerID)) await hook.fn(child)
+  }
   const base = { model: 'fixture', stream: true,
     messages: [{ role: 'user', content: `FIXTURE_SPEC:${JSON.stringify({ ...spec, gate })}` }],
-    tools: [{ function: { name: 'antigravity_run' } }],
+    tools: Object.keys(child.tools).map(name => ({ function: { name } })),
   }
   const request = (body: any, signal?: AbortSignal, session = 'stream-session') => fetch(`${provider.info.settings.baseURL}/chat/completions`, {
     method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${provider.info.settings.apiKey}`,
@@ -51,7 +59,7 @@ async function fixture(spec: object) {
   const call = frames(dispatch).flatMap(e => e.choices ?? []).flatMap(c => c.delta?.tool_calls ?? [])[0]
   const args = JSON.parse(call.function.arguments)
   expect(args.stream).toBe(true)
-  const returned = await tools.antigravity_run.execute(args, { sessionID: 'stream-session', signal: new AbortController().signal, progress: async () => {} })
+  const returned = await tools.antigravity_run.execute(args, { sessionID: 'stream-session', agent: child.agent, signal: new AbortController().signal, progress: async () => {} })
   const job = JSON.parse(returned.content)
   expect(job.stream_follow.seconds).toBe(86400)
   const followup = { ...base, messages: [...base.messages, { role: 'assistant', tool_calls: [call] },
@@ -78,7 +86,7 @@ async function readUntil(reader: ReadableStreamDefaultReader<Uint8Array>, check:
   return text
 }
 
-test('native provider delivers text and activity before CLI completion, without duplicate final text', async () => {
+test('native child retains delegation after catalog filtering and streams before CLI completion without duplicate final text', async () => {
   const f = await fixture({ initial: 'Hello ', activity: true, chunks: [{ text: 'world! ', delay: 100 }], response: 'Hello world! ' })
   try {
     const response = await f.request(f.followup)
