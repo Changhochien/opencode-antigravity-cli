@@ -1,4 +1,3 @@
-export function redact(value: any): string;
 export function bounded(value: any, size?: number): string;
 export function usage(value: any): {
     [k: string]: any;
@@ -17,5 +16,6 @@ export function lines(onLine: (line: string) => void, onInvalid: (reason: string
     write(chunk: any): void;
     end(): void;
 };
+export { redact } from "./redaction.mjs";
 export const RESPONSE_LIMIT: number;
 export const TASK_LIMIT: 256;

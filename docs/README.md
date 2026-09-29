@@ -150,9 +150,18 @@ written to diagnostics. Responses are private job data with best-effort credenti
 redaction, not public logs; inspect/redact them before sharing.
 
 Live response/activity data is separately retained in `live.ndjson` (1 MiB plus
-one rotated file, mode 0600). Streaming redaction retains incomplete tokens to
-avoid exposing credentials split across CLI chunks. Tool arguments and tool
+one rotated file, mode 0600). A bounded stateful redactor is shared by streaming
+and saved responses, retaining only possible credential prefixes across chunks
+and tool events. Long ordinary text, including CJK, streams without token omission.
+Tool arguments and tool
 output are excluded from both the live journal and UI activity deltas.
+
+The provider forwards role-labeled system/developer instructions on initial,
+resumed and explicitly started tasks. Run/wait answer text has no injected job
+footer or diagnostics: status, IDs, recovery notices and revised final snapshots
+appear in the reasoning/activity channel. Explicit start/status/cancel commands
+return their lifecycle control result. A revised snapshot cannot replace text
+already committed to the native stream; inspect it in activity or with status.
 
 On macOS/Linux, recovery validates the supervisor's process birth time. Windows
 uses PID liveness plus the private job heartbeat, so stale/reused PIDs cannot

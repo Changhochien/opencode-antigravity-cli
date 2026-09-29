@@ -146,6 +146,7 @@ export async function supervise(directory, request, deps = {}) {
 }
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
     let input = '';
+    process.stdin.setEncoding('utf8');
     for await (const chunk of process.stdin) {
         input += chunk;
         if (Buffer.byteLength(input) > 8 * 1024 * 1024)

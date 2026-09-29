@@ -98,8 +98,7 @@ test('native child retains delegation after catalog filtering and streams before
     expect(sse).toEndWith('data: [DONE]\n\n')
     expect(sse).not.toContain('PRIVATE_')
     const output = frames(sse).flatMap(e => e.choices ?? []).map(c => c.delta?.content ?? '').join('')
-    expect(output.match(/Hello world!/g)).toHaveLength(1)
-    expect(output).toContain('SUCCESS')
+    expect(output).toBe('Hello world! ')
     expect(frames(sse).find(e => e.usage)?.usage.prompt_tokens).toBe(20)
     let state = protocol.stream.initial({ model: { route: { providerMetadataKey: 'openai' }, provider: 'agy' } } as any)
     const native: any[] = []
@@ -110,7 +109,9 @@ test('native child retains delegation after catalog filtering and streams before
     }
     if (protocol.stream.onHalt) native.push(...await Effect.runPromise(protocol.stream.onHalt(state)))
     expect(native.filter(e => e.type === 'text-delta').length).toBeGreaterThan(1)
+    expect(native.filter(e => e.type === 'text-delta').map(e => e.text).join('')).toBe(output)
     expect(native.some(e => e.type === 'reasoning-delta' && e.text.includes('run_command'))).toBe(true)
+    expect(native.some(e => e.type === 'reasoning-delta' && e.text.includes('SUCCESS'))).toBe(true)
     expect(native.some(e => e.type === 'tool-call')).toBe(false)
   } finally { await f.cleanup() }
 }, 15000)
@@ -142,6 +143,7 @@ test('idle heartbeats carry no tokens and observer failure finishes with recover
   expect(response.output).toContain('observation interrupted for fixture-owned-job')
   expect(response.output).not.toContain('PRIVATE_OBSERVER_ERROR')
   expect(response.output).toEndWith('data: [DONE]\n\n')
+  expect(frames(response.output).flatMap(e => e.choices ?? []).map(c => c.delta?.content ?? '').join('')).toBe('')
   expect(closed && response.ended).toBe(true)
 })
 test('aborting a backpressured stream closes the observer without waiting for drain', async () => {
@@ -169,6 +171,7 @@ test('retention gaps and revised final answers remain visible without claiming s
   expect(response.output).toContain('Revised answer')
   expect(response.output).toContain('UNKNOWN')
   expect(response.output).not.toContain('SUCCESS')
+  expect(frames(response.output).flatMap(e => e.choices ?? []).map(c => c.delta?.content ?? '').join('')).toBe('Retained fragment')
 })
 
 test('disconnect and reconnect only reattach observers; no duplicate execution or usage', async () => {
@@ -189,6 +192,26 @@ test('disconnect and reconnect only reattach observers; no duplicate execution o
     expect(repeated.prompt_tokens).toBe(0)
     expect((await readFile(join(f.dir, 'launches.ndjson'), 'utf8')).trim().split('\n')).toHaveLength(1)
     expect((await f.request(f.followup, undefined, 'other-session')).status).toBe(400)
+  } finally { await f.cleanup() }
+}, 15000)
+
+test('native stream preserves JSON, long CJK text and redaction across tool events and final fallback', async () => {
+  const long = '文字🛰️'.repeat(2500)
+  const expected = JSON.stringify({ ok: true, text: long, note: 'password = [redacted] ' })
+  const f = await fixture({ initial: `{"ok":true,"text":"${long}","note":"password `, activity: true,
+    chunks: [{ text: '= ' }, { text: 'SYNTHETIC_SECRET ' }, { text: '"}' }],
+    response: JSON.stringify({ ok: true, text: long, note: 'password = SYNTHETIC_SECRET ' }) })
+  try {
+    const reader = (await f.request(f.followup)).body!.getReader()
+    let sse = await readUntil(reader, text => text.includes('[redacted]') && text.includes('\\"}'))
+    expect((await f.jobs.status('stream-session', f.job.job_id)).result_seen).toBe(false)
+    await writeFile(f.gate, '')
+    for (;;) { const chunk = await reader.read(); if (chunk.done) break; sse += new TextDecoder().decode(chunk.value) }
+    const text = frames(sse).flatMap(e => e.choices ?? []).map(c => c.delta?.content ?? '').join('')
+    expect(text).toBe(expected)
+    expect(JSON.parse(text).text).toBe(long)
+    expect(sse).not.toContain('SYNTHETIC_SECRET')
+    expect((await f.jobs.status('stream-session', f.job.job_id)).response).toBe(expected)
   } finally { await f.cleanup() }
 }, 15000)
 

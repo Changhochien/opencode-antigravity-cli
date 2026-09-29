@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.2
+
+- Forward role-labeled system/developer instructions on initial, resumed and explicit-start tasks; include them in idempotent dispatch identity.
+- Preserve exact-text/JSON answers by moving run/wait job status, diagnostics and recovery/revision notices to activity rather than answer text.
+- Share bounded incremental credential redaction between live output and retained responses, including fragments split by whitespace, tool events or response-step completion.
+- Preserve long unbroken prose/CJK text and decode supervisor stdin as streaming UTF-8.
+
 ## 0.2.1
 
 - Default to native subagent delegation: hide lifecycle tools from ordinary parent models and reject direct run/start execution outside the antigravity agent or an explicitly selected AGY model.

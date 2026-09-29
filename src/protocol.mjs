@@ -1,13 +1,10 @@
 // AGY's documented NDJSON protocol. See PROTOCOL.md for locally captured evidence.
 import { StringDecoder } from 'node:string_decoder'
+import { createRedactor, redact } from './redaction.mjs'
+export { redact } from './redaction.mjs'
 
 export const RESPONSE_LIMIT = 64 * 1024
 export const TASK_LIMIT = 256
-export function redact(value) {
-  return String(value).replace(/\b(?:gh[pousr]_[\w]+|sk-[\w-]{16,}|AIza[\w-]{20,})\b/g, '[redacted]')
-    .replace(/(Bearer\s+)[\w.+/=-]+/gi, '$1[redacted]')
-    .replace(/((?:api[_-]?key|access[_-]?token|password|authorization)\s*[:=]\s*)[^\s,;]+/gi, '$1[redacted]')
-}
 export function bounded(value, size = RESPONSE_LIMIT) { return redact(value).slice(-size) }
 export function usage(value) {
   return Object.fromEntries(Object.entries(value ?? {}).filter(([key, n]) =>
@@ -22,7 +19,10 @@ export function finished(job) { return ['SUCCESS', 'ERROR', 'CANCELED'].includes
 // Only response text (private result), usage, identities, and structural metadata survive.
 /** @param {any} job @param {(kind: string) => void} [notify] */
 export function tracker(job, notify = () => {}) {
-  let responseText = job.response
+  const response = createRedactor(text => {
+    job.response_truncated ||= job.response.length + text.length > RESPONSE_LIMIT
+    job.response = (job.response + text).slice(-RESPONSE_LIMIT)
+  })
   function notice(kind) { job.updated_at = new Date().toISOString(); notify(kind) }
   function uncertain(reason) { job.protocol_uncertain = true; job.diagnostic = reason; notice(reason) }
   function identity(id) {
@@ -68,9 +68,7 @@ export function tracker(job, notify = () => {}) {
           type: ['user_input', 'agent_response', 'tool', 'checkpoint', 'system_message'].includes(step.step_type) ? step.step_type : 'unknown',
         }
         if (step.step_type === 'agent_response' && typeof step.text_delta === 'string') {
-          job.response_truncated ||= (job.response.length + step.text_delta.length) > RESPONSE_LIMIT
-          responseText = (responseText + step.text_delta).slice(-RESPONSE_LIMIT)
-          job.response = bounded(responseText)
+          response.write(step.text_delta)
         }
         const info = step.tool_info
         if (step.step_type === 'tool' && info && typeof info === 'object') {
@@ -97,6 +95,7 @@ export function tracker(job, notify = () => {}) {
         }
         notice('step_update')
       } else if (event.event === 'result') {
+        response.end()
         const result = event.result
         if (!result || typeof result.status !== 'string') return uncertain('invalid_result')
         if (job.result_seen) return uncertain('duplicate_result')
@@ -130,6 +129,7 @@ export function tracker(job, notify = () => {}) {
       // Other stderr is intentionally not persisted.
     },
     close(code, signal) {
+      response.end()
       job.cli_exit = { code, signal }
       job.completed_at = new Date().toISOString()
       if (!job.result_seen || !job.conversation_id || job.protocol_uncertain || pending(job)) {

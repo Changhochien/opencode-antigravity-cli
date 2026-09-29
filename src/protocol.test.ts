@@ -36,7 +36,7 @@ test('diagnostic state excludes prompts/tool output and bounds private response 
   delta('qrstuvwxyz')
   expect(state.response).not.toContain('qrstuvwxyz')
   expect(JSON.stringify(state)).not.toContain('PRIVATE_')
-  delta('a'.repeat(RESPONSE_LIMIT * 3))
+  delta(' ' + 'a'.repeat(RESPONSE_LIMIT * 3))
   expect(state.response.length).toBeLessThanOrEqual(RESPONSE_LIMIT)
   expect(state.response_truncated).toBe(true)
 })

@@ -33,8 +33,8 @@ agy models
 Then use the **V2** OpenCode CLI:
 
 ```sh
-opencode plugin add github:Changhochien/opencode-antigravity-cli#v0.2.1
-npx --yes --package=github:Changhochien/opencode-antigravity-cli#v0.2.1 opencode-antigravity-agent
+opencode plugin add github:Changhochien/opencode-antigravity-cli#v0.2.2
+npx --yes --package=github:Changhochien/opencode-antigravity-cli#v0.2.2 opencode-antigravity-agent
 ```
 
 The installer creates one global agent, respecting `XDG_CONFIG_HOME`. Add `--project` for a project-local agent. Compiled JavaScript is included; installation needs no build scripts. If your desktop bundles V2 but the terminal `opencode` is V1, use the bundled V2 executable.
@@ -43,7 +43,7 @@ Select **antigravity** → **Antigravity CLI** → a model in OpenChamber. Ordin
 
 ### Upgrading
 
-Replace the existing plugin entry with the `#v0.2.1` entry above. If you use an earlier hand-installed `plugins/antigravity.ts`, move it outside plugin discovery before enabling the package, since both register the same plugin/provider IDs.
+Replace the existing plugin entry with the `#v0.2.2` entry above. If you use an earlier hand-installed `plugins/antigravity.ts`, move it outside plugin discovery before enabling the package, since both register the same plugin/provider IDs.
 
 The installer preserves existing agent definitions. Existing users should merge the **five lifecycle permissions** from [`agents/antigravity.md`](agents/antigravity.md) into their agent; the old run-only permissions cannot invoke wait/status/cancel/start. Preserve your selected model and other custom instructions.
 
@@ -51,6 +51,10 @@ When upgrading from v0.2.0, also merge the updated instruction to keep normal
 delegated tasks in the child session through completion/recovery. Immediate
 detached starts are reserved for explicit requests. Integrations that deliberately
 call run/start directly from other agents now need `options.directTools: true`.
+
+For v0.2.2, merge the agent's host-versus-worker clarification and exact-output
+instructions. Run/wait answers no longer include status footers; consumers should
+read job IDs and status from lifecycle results or the reasoning/activity channel.
 
 Refresh OpenChamber after loading the plugin. OpenCode watches configuration changes; if a manual service restart is needed, choose an idle time and use the V2 CLI's `opencode service restart`. Existing supervised jobs remain independent of that service.
 
@@ -95,13 +99,19 @@ permissions:
 {
   "$schema": "https://opencode.ai/config.json",
   "plugins": [{
-    "package": "github:Changhochien/opencode-antigravity-cli#v0.2.1",
+    "package": "github:Changhochien/opencode-antigravity-cli#v0.2.2",
     "options": { "directTools": true }
   }]
 }
 ```
 
 ### Streaming behavior
+
+Since **v0.2.2**, system/developer instructions are forwarded to AGY
+on initial and resumed turns and explicit starts. Run/wait output preserves the
+answer format; job IDs, status, diagnostics and revised final snapshots stay in
+the activity channel. Stateful redaction handles split credentials while preserving
+long ordinary text, including CJK.
 
 Text is emitted incrementally through OpenCode's native assistant stream. Tool names and ACTIVE/DONE transitions are explicitly labeled AGY activity in the reasoning pane. They are observational events, **not executable OpenCode tool calls or hidden chain-of-thought**.
 
@@ -130,7 +140,7 @@ For an explicit executable, merge this plugin entry into `opencode.jsonc`:
 {
   "$schema": "https://opencode.ai/config.json",
   "plugins": [{
-    "package": "github:Changhochien/opencode-antigravity-cli#v0.2.1",
+    "package": "github:Changhochien/opencode-antigravity-cli#v0.2.2",
     "options": { "binary": "/path/to/agy" }
   }]
 }
@@ -151,8 +161,9 @@ bun run test:package
 Tests use a fake CLI, injected controls, and sanitized captured protocol evidence. They require no authentication or paid model calls. Streaming is also validated through OpenCode 2.0.16's own protocol parser, asserting native text/activity deltas before CLI completion. POSIX-specific signal tests are skipped on Windows; unconfirmed cancellation behavior is still exercised there.
 
 The Node package smoke check loads the compiled public entrypoint and verifies
-native routing, blocked direct calls, owned legacy recovery and the compatibility
-option against real private job records in an isolated state directory. It uses
+native routing, blocked direct calls, owned legacy recovery, the compatibility
+option, instruction forwarding, exact-output streaming and incremental redaction
+against compiled modules and real private job records in an isolated state directory. It uses
 a mocked host context and cached model catalog; it never contacts a model or a
 running OpenCode service.
 

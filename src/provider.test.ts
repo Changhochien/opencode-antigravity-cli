@@ -89,8 +89,8 @@ test("returns the completed AGY response instead of delegating twice", async () 
     ],
   })
   const completion = await response.json()
-  expect(completion.choices[0].message.content).toContain("Reviewed")
-  expect(completion.choices[0].message.content).toContain("A command was denied.")
+  expect(completion.choices[0].message.content).toBe("Reviewed")
+  expect(completion.choices[0].message.reasoning_content).toContain("A command was denied.")
   expect(completion.choices[0].finish_reason).toBe("stop")
   expect(completion.usage.completion_tokens).toBe(10)
   expect(completion.usage.prompt_tokens).toBe(20)
@@ -157,9 +157,10 @@ test('returns partial/unknown results with recovery IDs, and accounts each compl
     { role: 'tool', tool_call_id: 'lifecycle', content: JSON.stringify(result) },
   ]
   const unknown = await request({ ...base, messages: messages({ status: 'UNKNOWN', job_id: id, response: 'partial', tasks: [{ id: 'task-497', state: 'RUNNING' }] }) })
-  const text = (await unknown.json()).choices[0].message.content
-  expect(text).toContain('UNKNOWN')
-  expect(text).toContain(id)
+  const message = (await unknown.json()).choices[0].message
+  expect(message.content).toBe('partial')
+  expect(message.reasoning_content).toContain('UNKNOWN')
+  expect(message.reasoning_content).toContain(id)
   const done = { status: 'SUCCESS', job_id: id, response: 'done', turn_usage: { input_tokens: 20, output_tokens: 5 } }
   const first = await request({ ...base, messages: messages(done) })
   const again = await request({ ...base, messages: messages(done) })
@@ -183,7 +184,7 @@ test('explicit start is available through the provider and malformed lifecycle c
     const call = (await first.json()).choices[0].message.tool_calls[0]
     expect(call.function.name).toBe('antigravity_start')
     const args = JSON.parse(call.function.arguments)
-    expect(args.prompt).toBe('A fresh independent task')
+    expect(args.prompt).toContain('[user]\nA fresh independent task')
     expect(args.conversation_id).toBeUndefined()
     expect((await again.json()).choices[0].message.tool_calls[0]).toEqual(call)
     for (const content of ['/agy wait task-266', '/agy wait -1', '/agy cancel bad-id', '/agy start']) {
@@ -203,4 +204,55 @@ test('recovery uses persisted job turn metadata when the caller never saved its 
     expect(args.prompt).not.toContain('Already completed original task')
     expect(args.prompt).toContain('Now explain the outcome without edits')
   } finally { latest = undefined }
+})
+
+test('forwards role-labeled instructions on initial, resumed, replayed and explicit-start dispatches', async () => {
+  const instructions = [
+    { role: 'system', content: 'SYSTEM_FIXTURE: never use the network.' },
+    { role: 'developer', content: [{ type: 'text', text: 'DEVELOPER_FIXTURE: valid JSON only.' }] },
+  ]
+  const dispatch = async (messages: any[], tools = base.tools) => {
+    const response = await request({ ...base, messages, tools })
+    expect(response.status).toBe(200)
+    return JSON.parse((await response.json()).choices[0].message.tool_calls[0].function.arguments)
+  }
+  const messages = [...instructions, { role: 'user', content: 'Instruction forwarding fixture first turn' }]
+  const first = await dispatch(messages)
+  expect(first.prompt).toContain('[system]\nSYSTEM_FIXTURE')
+  expect(first.prompt).toContain('[developer]\nDEVELOPER_FIXTURE')
+  expect(await dispatch(messages)).toEqual(first)
+  const changed = await dispatch([{ role: 'system', content: 'Changed constraints' }, ...messages.slice(1)])
+  expect(changed.request_id).not.toBe(first.request_id)
+  storage.set(conversationKey(sessionID), { conversation_id: 'instruction-fixture', userTurns: 1 })
+  try {
+    const resumed = await dispatch([...messages, { role: 'assistant', content: 'Finished' }, { role: 'user', content: 'Instruction fixture follow-up' }])
+    expect(resumed.conversation_id).toBe('instruction-fixture')
+    expect(resumed.prompt).toContain('[system]\nSYSTEM_FIXTURE')
+    expect(resumed.prompt).toContain('[developer]\nDEVELOPER_FIXTURE')
+    expect(resumed.prompt).toContain('Instruction fixture follow-up')
+    expect(resumed.prompt).not.toContain('Instruction forwarding fixture first turn')
+    const started = await dispatch([...messages, { role: 'user', content: '/agy start Independent instruction fixture' }],
+      [{ type: 'function', function: { name: 'antigravity_start' } }])
+    expect(started.prompt).toContain('[system]\nSYSTEM_FIXTURE')
+    expect(started.prompt).toContain('[developer]\nDEVELOPER_FIXTURE')
+    expect(started.prompt).toContain('[user]\nIndependent instruction fixture')
+    expect(started.prompt).not.toContain('Instruction forwarding fixture first turn')
+    expect(started.conversation_id).toBeUndefined()
+  } finally { storage.delete(conversationKey(sessionID)) }
+})
+
+test('run and wait preserve exact JSON output with separate lifecycle metadata, including nonstreaming replies', async () => {
+  for (const name of ['antigravity_run', 'antigravity_wait']) {
+    const id = `agy-${'e'.repeat(32)}`
+    const response = await request({ ...base, messages: [...base.messages,
+      { role: 'assistant', tool_calls: [{ id: name, function: { name, arguments: '{}' } }] },
+      { role: 'tool', tool_call_id: name, content: JSON.stringify({ status: 'SUCCESS', job_id: id, response: '{"ok":true}', diagnostics: 'fixture note' }) },
+    ] })
+    const message = (await response.json()).choices[0].message
+    expect(message.content).toBe('{"ok":true}')
+    expect(JSON.parse(message.content)).toEqual({ ok: true })
+    expect(message.reasoning_content).toContain(id)
+    expect(message.reasoning_content).toContain('SUCCESS')
+    expect(message.reasoning_content).toContain('fixture note')
+  }
 })

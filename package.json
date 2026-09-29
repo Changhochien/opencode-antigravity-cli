@@ -1,6 +1,6 @@
 {
   "name": "opencode-antigravity-cli",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Use the authenticated Antigravity CLI as an OpenCode agent with models in OpenChamber's model picker.",
   "type": "module",
   "license": "MIT",

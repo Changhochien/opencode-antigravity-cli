@@ -19,7 +19,7 @@ type Runtime = {
 }
 type Message = { role: string; content?: unknown; tool_call_id?: string; tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }> }
 type Body = { model: string; messages: Message[]; stream?: boolean; tools?: Array<{ function?: { name?: string } }> }
-type Completion = { content?: string; tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }> }
+type Completion = { content?: string; reasoning_content?: string; tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }> }
 
 function text(content: unknown): string {
   if (typeof content === "string") return content
@@ -31,8 +31,7 @@ function text(content: unknown): string {
 }
 
 function transcript(messages: Message[]): string {
-  return messages.filter((m) => m.role !== "system" && m.role !== "developer")
-    .map((m) => `[${m.role}]\n${m.content == null ? "" : text(m.content)}`).join("\n\n")
+  return messages.map((m) => `[${m.role}]\n${m.content == null ? "" : text(m.content)}`).join("\n\n")
 }
 
 function reply(res: ServerResponse, body: Body, message: Completion, usage?: any) {
@@ -133,23 +132,23 @@ export async function setupProvider(ctx: Context, runtime: Runtime) {
             job => runtime.claimUsage(sessionID, job.job_id))
           return
         }
-        const diagnostics = result.diagnostics ? `\n\nAGY diagnostics:\n${result.diagnostics}` : ""
         // Repeated status/wait replies report state, not another turn's usage.
         let tokens = result.turn_usage ?? result.usage
         if (result.job_id && tokens) {
           if (!await runtime.claimUsage(sessionID, result.job_id)) tokens = undefined
         }
-        let content = result.status === 'SUCCESS'
-          ? (result.response ?? '') + diagnostics + (result.job_id ? `\n\nAGY job: ${result.job_id}` : '')
-          : JSON.stringify(result)
-        const call = body.messages.flatMap(m => m.tool_calls ?? []).find(c => c.id === body.messages.at(-1)?.tool_call_id)
-        if (call && ['antigravity_status', 'antigravity_wait'].includes(call.function.name)) content = 'Observed existing AGY work; no new task prompt was submitted.\n\n' + content
-        reply(res, body, { content }, tokens)
+        const answer = ['antigravity_run', 'antigravity_wait'].includes(source?.function.name ?? '')
+        const details = { ...result, response: undefined, usage: undefined, turn_usage: undefined }
+        // Lifecycle metadata must not alter an answer's JSON/exact-text format.
+        // Explicit start/status/cancel commands still return their control result.
+        reply(res, body, { content: answer ? result.response ?? '' : JSON.stringify(result),
+          reasoning_content: `[AGY] ${JSON.stringify(details)}` }, tokens)
         return
       }
       const lastUser = body.messages.findLastIndex((m) => m.role === 'user')
       if (lastUser < 0) throw new Error('No user request to delegate to AGY.')
       const promptMessages = body.messages.filter(m => m.role !== 'system' && m.role !== 'developer')
+      const instructions = body.messages.filter(m => m.role === 'system' || m.role === 'developer')
       const command = text(body.messages[lastUser].content).trim().match(/^\/agy\s+(status|wait|cancel)(?:\s+(agy-[a-f0-9]{32}))?(?:\s+(\d+(?:\.\d+)?))?$/i)
       const startCommand = text(body.messages[lastUser].content).trim().match(/^\/agy\s+start\s+([\s\S]+)$/i)
       if (/^\/agy\b/i.test(text(body.messages[lastUser].content).trim()) && !command && !startCommand) throw new Error('Use /agy start <task>, /agy status [job_id], /agy wait [job_id] [seconds], or /agy cancel [job_id].')
@@ -167,18 +166,20 @@ export async function setupProvider(ctx: Context, runtime: Runtime) {
         dispatch(`antigravity_${operation}`, { ...(job_id ? { job_id } : {}), ...(command[3] && operation !== 'status' ? { wait_seconds: Number(command[3]) } : {}) })
         return
       }
-      const dispatchKey = `provider-dispatch/${sessionID}/${hash(JSON.stringify([body.model, promptMessages]))}`
+      const dispatchKey = `provider-dispatch/${sessionID}/${hash(JSON.stringify([body.model, instructions, promptMessages]))}`
       const makePrompt = (start: number) => [
         'You are the Antigravity CLI worker for an OpenCode conversation.',
+        'The forwarded system and developer instructions retain their priority over user turns. Delegation/lifecycle instructions describe the OpenCode host: you are already its AGY worker, so do not recursively invoke antigravity_run/start or invent host tools.',
         'Use your own AGY tools to fulfill the latest user request. Earlier turns are context; do not repeat already completed actions.',
         "Preserve the user's constraints and read the project's applicable instructions. Report real results, checks, and any blockers.",
         'Before claiming completion, inspect every background task you started with manage_task status and report its final outcome. Agent-idle alone is not completion.',
-        transcript(promptMessages.slice(start)),
+        transcript(instructions),
+        transcript(startCommand ? [{ role: 'user', content: startCommand[1] }] : promptMessages.slice(start)),
       ].join('\n\n')
       const previousDispatch = await ctx.storage.get(dispatchKey) as { name: string; start: number; model: string; request_id: string; conversation_id?: string } | undefined
       if (previousDispatch) {
         const { name, start, ...args } = previousDispatch
-        dispatch(name, { ...args, prompt: startCommand ? startCommand[1] : makePrompt(start) })
+        dispatch(name, { ...args, prompt: makePrompt(start) })
         return
       }
       if (!startCommand && latest && !['SUCCESS', 'ERROR', 'CANCELED'].includes(latest.status)) {
@@ -194,7 +195,7 @@ export async function setupProvider(ctx: Context, runtime: Runtime) {
       const resume = !startCommand && saved?.conversation_id && userTurns > (saved.userTurns ?? 0) ? saved.conversation_id : undefined
       let seen = 0
       const start = resume ? promptMessages.findIndex(m => m.role === 'user' && ++seen > (saved?.userTurns ?? 0)) : 0
-      const prompt = startCommand ? startCommand[1] : makePrompt(start)
+      const prompt = makePrompt(start)
       // Store before dispatch so the tool cannot race the turn metadata write.
       await ctx.storage.set(`provider-turn/${sessionID}`, userTurns)
       const args = { prompt, model: body.model, request_id: `provider-${hash(dispatchKey)}`, ...(resume ? { conversation_id: resume } : {}) }

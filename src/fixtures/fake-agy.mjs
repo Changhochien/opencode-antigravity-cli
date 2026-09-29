@@ -1,5 +1,6 @@
 import { appendFileSync, existsSync } from 'node:fs'
 let input = ''
+process.stdin.setEncoding('utf8')
 for await (const chunk of process.stdin) input += chunk
 const message = JSON.parse(input)
 let spec

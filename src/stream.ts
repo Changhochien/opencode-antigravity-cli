@@ -80,10 +80,10 @@ export async function streamJob(res: ServerResponse, model: string, observations
     if (!streamed) await content(response)
     else if (response && response !== tail && !tail.endsWith(response)) {
       if (!hadGap && streamed < 65536 && response.startsWith(tail)) await content(response.slice(tail.length))
-      else await content(`\n\n${final.result_seen ? 'AGY final response' : 'Latest retained response'}:\n${response}`)
+      else await delta({ reasoning_content: `\n[AGY] ${final.result_seen ? 'AGY final response' : 'Latest retained response'} differs from committed text:\n${response}\n` })
     }
     const state = final.wait_expired ? `${final.status}; observer wait expired, job continues` : final.status
-    await delta({ content: `\n\n[AGY job ${final.job_id}: ${state}]${final.diagnostic ? `\n${final.diagnostic}` : ''}` })
+    await delta({ reasoning_content: `[AGY job ${final.job_id}: ${state}]${final.diagnostic ? `\n${final.diagnostic}` : ''}\n` })
     const tokens = (final.usage || final.turn_usage) && await claimUsage(final) ? final.turn_usage ?? final.usage : undefined
     await event({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })
     await event({ choices: [], usage: tokenUsage(tokens) })
@@ -91,7 +91,7 @@ export async function streamJob(res: ServerResponse, model: string, observations
     if (!res.destroyed) res.end()
   } catch {
     if (!signal.aborted && !res.destroyed) {
-      await delta({ content: `\n\n[AGY observation interrupted${final ? ` for ${final.job_id}` : ''}. Use /agy status; execution was not canceled.]` })
+      await delta({ reasoning_content: `\n[AGY observation interrupted${final ? ` for ${final.job_id}` : ''}. Use /agy status; execution was not canceled.]\n` })
       await event({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })
       await write('data: [DONE]\n\n'); res.end()
     }
